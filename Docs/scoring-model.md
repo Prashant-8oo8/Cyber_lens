@@ -1,9 +1,6 @@
 # Threat Scoring & Verdict Logic Model
 
-**Version:** 1.0  
-**Author:** Contributor  
-**Date:** January 2026  
-**Status:** Proposal
+**Author:** Ishan Raj Singh  
 
 ---
 
@@ -807,34 +804,3 @@ test_cases = [
 ```
 
 ---
-
-## Document Metadata
-
-**Revision History:**
-
-| Version | Date | Changes |
-|---------|------|---------|
-| 1.0 | 2026-01-03 | Initial proposal |
-
-**Contributors:**
-- Design: [Your Name]
-- Review: Pending maintainer feedback
-
-**Related Issues:**
-- #124 (This proposal)
-
-**License:** Same as project (check repository LICENSE file)
-
----
-
-## Acknowledgments
-
-This proposal draws inspiration from:
-- CVSS (Common Vulnerability Scoring System)
-- VirusTotal's detection ratio methodology
-- Industry-standard threat intelligence aggregation practices
-
-**References:**
-- [NIST SP 800-150: Guide to Cyber Threat Information Sharing](https://csrc.nist.gov/publications/detail/sp/800-150/final)
-- [FIRST CVSS v3.1 Specification](https://www.first.org/cvss/v3.1/specification-document)
-- [STIX 2.1 Confidence Scales](https://docs.oasis-open.org/cti/stix/v2.1/)
