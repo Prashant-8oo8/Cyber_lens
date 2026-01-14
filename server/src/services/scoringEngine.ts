@@ -20,6 +20,7 @@ export interface ProviderTrustConfig {
 export interface ScoringConfig {
   providerTrust: ProviderTrustConfig;
   defaultTrustLevel: TrustLevel;
+  singleProviderPenalty: number;
 }
 
 export interface ScoringInput {
@@ -40,6 +41,7 @@ export interface ScoringResult {
   finalScore: number | null;
   verdict: FinalVerdict;
   processedProviders: ProcessedProvider[];
+  warnings: string[];
   meta: {
     totalProviders: number;
     successfulProviders: number;
@@ -88,10 +90,24 @@ const VERDICT_THRESHOLDS = {
 const DEFAULT_CONFIG: ScoringConfig = {
   providerTrust: {},
   defaultTrustLevel: "medium",
+  singleProviderPenalty: 0.5,
 };
 
-function getProviderTrustLevel(providerName: string, config: ScoringConfig): TrustLevel {
-  return config.providerTrust[providerName] ?? config.defaultTrustLevel;
+interface TrustLookupResult {
+  trustLevel: TrustLevel;
+  isExplicit: boolean;
+}
+
+function getProviderTrustLevel(providerName: string, config: ScoringConfig): TrustLookupResult {
+  const normalizedName = providerName.toLowerCase().trim();
+  
+  for (const [key, value] of Object.entries(config.providerTrust)) {
+    if (key.toLowerCase().trim() === normalizedName) {
+      return { trustLevel: value, isExplicit: true };
+    }
+  }
+  
+  return { trustLevel: config.defaultTrustLevel, isExplicit: false };
 }
 
 function normalizeVerdictToScore(verdict: ProviderVerdict): number {
@@ -119,7 +135,7 @@ function mapScoreToVerdict(score: number, hasConflictingSignals: boolean): Final
 function extractProviderSignal(
   result: ProviderExecutionResult<NormalizedProviderResponse>,
   config: ScoringConfig
-): ProviderSignal | null {
+): { signal: ProviderSignal; isExplicitTrust: boolean } | null {
   if (result.status !== "success" || !result.data) {
     return null;
   }
@@ -127,14 +143,17 @@ function extractProviderSignal(
   const data = result.data;
   const verdict: ProviderVerdict = data.verdict ?? "unknown";
   const confidence: ProviderConfidence = data.confidence ?? "medium";
-  const trustLevel = getProviderTrustLevel(result.provider, config);
+  const { trustLevel, isExplicit } = getProviderTrustLevel(result.provider, config);
 
   return {
-    provider: result.provider,
-    verdict,
-    confidence,
-    trustLevel,
-    status: result.status,
+    signal: {
+      provider: result.provider,
+      verdict,
+      confidence,
+      trustLevel,
+      status: result.status,
+    },
+    isExplicitTrust: isExplicit,
   };
 }
 
@@ -148,6 +167,7 @@ export function computeScore(input: ScoringInput): ScoringResult {
 
   const processedProviders: ProcessedProvider[] = [];
   const validSignals: Array<{ normalizedScore: number; effectiveWeight: number }> = [];
+  const warnings: string[] = [];
 
   for (const result of providers) {
     if (result.status === "success") {
@@ -158,9 +178,15 @@ export function computeScore(input: ScoringInput): ScoringResult {
       failedProviders++;
     }
 
-    const signal = extractProviderSignal(result, config);
+    const extracted = extractProviderSignal(result, config);
 
-    if (signal) {
+    if (extracted) {
+      const { signal, isExplicitTrust } = extracted;
+      
+      if (!isExplicitTrust) {
+        warnings.push(`Provider "${signal.provider}" using default trust level "${config.defaultTrustLevel}"`);
+      }
+
       const normalizedScore = normalizeVerdictToScore(signal.verdict);
       const effectiveWeight = calculateEffectiveWeight(signal.trustLevel, signal.confidence);
 
@@ -193,6 +219,7 @@ export function computeScore(input: ScoringInput): ScoringResult {
       finalScore: null,
       verdict: "unknown",
       processedProviders,
+      warnings,
       meta: {
         totalProviders,
         successfulProviders,
@@ -206,6 +233,10 @@ export function computeScore(input: ScoringInput): ScoringResult {
 
   const singleProviderMode = validSignals.length === 1;
 
+  if (singleProviderMode) {
+    warnings.push("Single provider mode: reduced confidence due to lack of corroboration");
+  }
+
   const sumWeights = validSignals.reduce((sum, s) => sum + s.effectiveWeight, 0);
 
   if (sumWeights === 0) {
@@ -213,6 +244,7 @@ export function computeScore(input: ScoringInput): ScoringResult {
       finalScore: null,
       verdict: "unknown",
       processedProviders,
+      warnings,
       meta: {
         totalProviders,
         successfulProviders,
@@ -229,7 +261,13 @@ export function computeScore(input: ScoringInput): ScoringResult {
     0
   );
 
-  const finalScore = Math.round(sumWeightedScores / sumWeights);
+  let finalScore = Math.round(sumWeightedScores / sumWeights);
+
+  if (singleProviderMode && config.singleProviderPenalty > 0) {
+    const penalty = config.singleProviderPenalty;
+    finalScore = Math.round(finalScore * (1 - penalty) + 30 * penalty);
+  }
+
   const clampedScore = Math.max(0, Math.min(100, finalScore));
 
   const scores = validSignals.map(s => s.normalizedScore);
@@ -243,6 +281,7 @@ export function computeScore(input: ScoringInput): ScoringResult {
     finalScore: clampedScore,
     verdict,
     processedProviders,
+    warnings,
     meta: {
       totalProviders,
       successfulProviders,
